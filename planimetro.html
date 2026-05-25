@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Planimetro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,600;1,300&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+:root {
+  --bg:#0f0f0d; --surface:#1a1a17; --surface2:#222220;
+  --border:#2e2e28; --accent:#c8f542; --accent2:#f5d442;
+  --text:#e8e8e0; --muted:#6b6b60;
+  --door:#ff8c42; --win:#42d4ff; --conn:#c8f542;
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --sheet-peek:240px;
+}
+html,body { height:100%; overflow:hidden; }
+body { background:var(--bg); color:var(--text); font-family:'DM Mono',monospace; display:flex; flex-direction:column; padding-top:var(--safe-top); }
+
+/* HEADER */
+header { display:flex; align-items:center; justify-content:space-between; padding:0.75rem 1rem; border-bottom:1px solid var(--border); flex-shrink:0; z-index:10; background:var(--bg); }
+.logo { font-family:'Fraunces',serif; font-size:1.4rem; font-weight:600; color:var(--accent); }
+.logo-sub { font-size:0.55rem; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase; display:block; margin-top:-2px; }
+
+/* PHASE STEPPER */
+.phases { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; background:var(--bg); z-index:9; }
+.phase-tab { flex:1; padding:0.55rem 0.5rem; display:flex; flex-direction:column; align-items:center; gap:0.2rem; border-right:1px solid var(--border); transition:all 0.2s; cursor:default; }
+.phase-tab:last-child { border-right:none; }
+.phase-num { width:20px; height:20px; border-radius:50%; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:0.6rem; flex-shrink:0; }
+.phase-tab.active { background:rgba(200,245,66,0.05); }
+.phase-tab.active .phase-num { background:var(--accent); color:#0f0f0d; }
+.phase-tab.active .phase-label { color:var(--accent); }
+.phase-label { font-size:0.52rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); }
+.phase-tab.done .phase-num { background:var(--border); }
+.phase-tab.done .phase-num::after { content:'✓'; }
+
+/* MAIN */
+.main { flex:1; position:relative; overflow:hidden; display:flex; flex-direction:column; }
+
+/* CANVAS */
+#canvasViewport { flex:1; overflow:hidden; position:relative; display:flex; align-items:center; justify-content:center; touch-action:none; }
+.empty-state { text-align:center; padding:2rem; pointer-events:none; }
+.empty-icon { font-size:3.5rem; display:block; margin-bottom:0.75rem; opacity:0.2; }
+.empty-title { font-family:'Fraunces',serif; font-size:1.2rem; font-weight:300; font-style:italic; color:var(--muted); margin-bottom:0.4rem; }
+.empty-text { font-size:0.65rem; color:var(--muted); line-height:1.9; }
+.empty-text em { color:var(--accent); font-style:normal; }
+
+/* LOADING */
+.loading-state { text-align:center; }
+.loading-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; width:48px; margin:0 auto 0.75rem; }
+.loading-cell { height:14px; background:var(--border); border-radius:1px; animation:pulse 1.2s ease-in-out infinite; }
+.loading-cell:nth-child(2){animation-delay:.1s}.loading-cell:nth-child(3){animation-delay:.2s}
+.loading-cell:nth-child(4){animation-delay:.15s}.loading-cell:nth-child(5){animation-delay:.25s}.loading-cell:nth-child(6){animation-delay:.35s}
+.loading-cell:nth-child(7){animation-delay:.2s}.loading-cell:nth-child(8){animation-delay:.3s}.loading-cell:nth-child(9){animation-delay:.4s}
+@keyframes pulse { 0%,100%{background:var(--border)} 50%{background:var(--accent)} }
+.loading-text { font-size:0.68rem; color:var(--muted); }
+.loading-step { font-size:0.6rem; color:var(--accent2); margin-top:0.35rem; min-height:1em; }
+
+/* DRAG CANVAS */
+.drag-room { position:absolute; border-radius:3px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; border:2px solid transparent; transition:box-shadow 0.15s,border-color 0.15s; cursor:pointer; user-select:none; -webkit-user-select:none; }
+.drag-room.selected { border-color:var(--accent); box-shadow:0 0 0 2px rgba(200,245,66,0.3); }
+.drag-room-label { font-size:0.55rem; letter-spacing:0.08em; text-transform:uppercase; font-weight:500; }
+.drag-room-sub { font-size:0.48rem; opacity:0.5; margin-top:1px; }
+#connSvg { position:absolute; top:0; left:0; pointer-events:none; }
+#floorplan-svg { max-width:100%; max-height:100%; display:block; }
+
+/* LEGEND */
+.legend { position:absolute; top:0.75rem; right:0.75rem; background:rgba(26,26,23,0.92); backdrop-filter:blur(8px); border:1px solid var(--border); border-radius:8px; padding:0.5rem 0.65rem; display:none; flex-direction:column; gap:0.3rem; z-index:5; }
+.legend-item { display:flex; align-items:center; gap:0.4rem; font-size:0.55rem; color:var(--muted); }
+.legend-dot { width:10px; height:3px; border-radius:2px; flex-shrink:0; }
+
+/* ── BOTTOM SHEET ── */
+.sheet { position:absolute; bottom:0; left:0; right:0; background:var(--surface); border-top:1px solid var(--border); border-radius:16px 16px 0 0; display:flex; flex-direction:column; transition:transform 0.35s cubic-bezier(0.32,0.72,0,1); z-index:50; padding-bottom:var(--safe-bottom); max-height:90vh; }
+.sheet.collapsed { transform:translateY(calc(100% - var(--sheet-peek))); }
+.sheet.expanded { transform:translateY(0); }
+.sheet-handle-area { padding:0.75rem 1rem 0; flex-shrink:0; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:0.5rem; }
+.sheet-handle { width:36px; height:4px; background:var(--border); border-radius:2px; }
+.sheet-header { width:100%; display:flex; align-items:center; justify-content:space-between; }
+.sheet-title { font-size:0.65rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); }
+.sheet-toggle-btn { background:none; border:none; color:var(--muted); font-size:0.65rem; cursor:pointer; padding:0.25rem; min-width:24px; min-height:24px; }
+.sheet-body { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; padding:0.75rem 1rem 0; }
+.sheet-body::-webkit-scrollbar { display:none; }
+
+/* UPLOAD ZONE */
+.upload-zone { border:1.5px dashed var(--border); border-radius:8px; padding:1.25rem 1rem; text-align:center; position:relative; transition:all 0.2s; margin-bottom:0.75rem; }
+.upload-zone.drag-over { border-color:var(--accent); background:rgba(200,245,66,0.04); }
+.upload-zone input { position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; }
+.upload-hint { font-size:0.68rem; color:var(--muted); line-height:1.7; }
+.upload-hint strong { color:var(--accent); }
+
+/* NAME INPUT */
+.room-name-row { display:flex; gap:0.5rem; margin-bottom:0.75rem; }
+.room-name-row input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:'DM Mono',monospace; font-size:0.72rem; padding:0.6rem 0.75rem; outline:none; transition:border-color 0.2s; -webkit-appearance:none; }
+.room-name-row input:focus { border-color:var(--accent); }
+.room-name-row input::placeholder { color:var(--muted); }
+
+/* ── ROOM CARDS (vertical list) ── */
+.room-list { display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.75rem; }
+
+.room-card {
+  background:var(--bg); border:1px solid var(--border);
+  border-radius:10px; overflow:hidden;
+  transition:border-color 0.2s;
+}
+.room-card.analyzed { border-color:rgba(200,245,66,0.35); }
+.room-card.analyzing { border-color:rgba(245,212,66,0.4); }
+.room-card.error { border-color:rgba(255,66,66,0.4); }
+
+/* Card top row: name + status + remove */
+.room-card-header { display:flex; align-items:center; gap:0.5rem; padding:0.55rem 0.65rem 0.4rem; }
+.room-card-color { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.room-card-name { flex:1; font-size:0.72rem; font-weight:500; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.room-card-status { font-size:0.55rem; flex-shrink:0; }
+.room-card-status.ok { color:var(--accent); }
+.room-card-status.busy { color:var(--accent2); }
+.room-card-status.err { color:#ff6666; }
+.room-card-remove { background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.75rem; min-width:28px; min-height:28px; display:flex; align-items:center; justify-content:center; flex-shrink:0; border-radius:6px; }
+.room-card-remove:active { color:#ff6666; background:rgba(255,66,66,0.1); }
+
+/* Photo strip */
+.photo-strip { display:flex; gap:0.4rem; overflow-x:auto; padding:0 0.65rem 0.55rem; -webkit-overflow-scrolling:touch; }
+.photo-strip::-webkit-scrollbar { display:none; }
+
+.photo-thumb-wrap { position:relative; flex-shrink:0; }
+.photo-thumb { width:64px; height:64px; object-fit:cover; border-radius:6px; display:block; border:1px solid var(--border); }
+.photo-thumb-remove { position:absolute; top:3px; right:3px; background:rgba(0,0,0,0.65); border:none; color:#fff; width:18px; height:18px; border-radius:50%; font-size:0.55rem; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+
+/* Add-photo button inside strip */
+.photo-add-btn { width:64px; height:64px; border-radius:6px; border:1.5px dashed var(--border); background:transparent; color:var(--muted); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; flex-shrink:0; font-family:'DM Mono',monospace; font-size:0.5rem; position:relative; transition:border-color 0.15s,color 0.15s; }
+.photo-add-btn:active { border-color:var(--accent); color:var(--accent); }
+.photo-add-btn input { position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; }
+.photo-add-icon { font-size:1.1rem; line-height:1; }
+
+/* photo count badge */
+.photo-count-badge { font-size:0.5rem; color:var(--muted); padding:0 0.65rem 0.5rem; }
+
+/* BUTTONS */
+.btn { background:var(--accent); color:#0f0f0d; border:none; border-radius:8px; font-family:'DM Mono',monospace; font-size:0.72rem; font-weight:500; letter-spacing:0.06em; padding:0.75rem 1rem; cursor:pointer; transition:all 0.15s; white-space:nowrap; min-height:44px; display:flex; align-items:center; justify-content:center; gap:0.4rem; width:100%; margin-bottom:0.5rem; }
+.btn:active { transform:scale(0.97); }
+.btn:disabled { background:var(--border); color:var(--muted); cursor:not-allowed; transform:none; }
+.btn-ghost { background:transparent; color:var(--text); border:1px solid var(--border); }
+.btn-ghost:active { border-color:var(--accent); color:var(--accent); }
+.btn-row { display:flex; gap:0.5rem; margin-bottom:0.5rem; }
+.btn-row .btn { margin-bottom:0; }
+
+/* CONNECT */
+.connect-hint { background:rgba(200,245,66,0.08); border:1px solid rgba(200,245,66,0.2); border-radius:6px; padding:0.5rem 0.75rem; font-size:0.62rem; color:var(--accent); margin-bottom:0.5rem; display:none; }
+.conn-list { display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.75rem; }
+.conn-item { display:flex; align-items:center; gap:0.5rem; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:0.5rem 0.65rem; font-size:0.62rem; color:var(--muted); }
+.conn-dot { width:6px; height:6px; border-radius:50%; background:var(--conn); flex-shrink:0; }
+.conn-remove { margin-left:auto; background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.75rem; min-width:28px; min-height:28px; display:flex; align-items:center; justify-content:center; }
+.conn-remove:active { color:#ff6666; }
+.conn-empty { font-size:0.62rem; color:var(--muted); font-style:italic; padding:0.3rem 0; }
+
+/* TOAST */
+.toast { position:fixed; bottom:calc(var(--sheet-peek) + 1rem); left:50%; transform:translateX(-50%) translateY(20px); background:var(--surface2); border:1px solid var(--accent); border-radius:20px; padding:0.5rem 1rem; font-size:0.68rem; color:var(--accent); opacity:0; transition:all 0.25s ease; z-index:200; white-space:nowrap; pointer-events:none; }
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* SECTION DIVIDER */
+.section-label { font-size:0.58rem; letter-spacing:0.18em; text-transform:uppercase; color:var(--muted); margin-bottom:0.5rem; }
+
+/* ── DESKTOP ── */
+@media (min-width:768px) {
+  .main { flex-direction:row; }
+  #canvasViewport { flex:1; overflow:auto; align-items:flex-start; justify-content:flex-start; padding:1.5rem; touch-action:auto; }
+  .sheet { position:static; transform:none !important; width:300px; max-height:none; border-radius:0; border-top:none; border-left:1px solid var(--border); flex-direction:column; order:-1; }
+  .sheet-handle-area { display:none; }
+  .sheet-body { flex:1; padding:1rem; }
+  .legend { top:1.25rem; right:1.25rem; }
+  :root { --sheet-peek:0px; }
+  .toast { bottom:2rem; }
+  .photo-strip { flex-wrap:wrap; overflow-x:visible; }
+  .photo-thumb { width:56px; height:56px; }
+  .photo-add-btn { width:56px; height:56px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="logo">Planimetro</span>
+    <span class="logo-sub">Planos desde fotografías · IA</span>
+  </div>
+  <button class="btn btn-ghost" style="width:auto;margin:0;min-height:36px;padding:0.4rem 0.7rem;font-size:0.6rem" onclick="resetAll()">✕ Reiniciar</button>
+</header>
+
+<div class="phases">
+  <div class="phase-tab active" id="ptab1"><div class="phase-num" id="pnum1">1</div><div class="phase-label">Fotos</div></div>
+  <div class="phase-tab" id="ptab2"><div class="phase-num" id="pnum2">2</div><div class="phase-label">Ordenar</div></div>
+  <div class="phase-tab" id="ptab3"><div class="phase-num" id="pnum3">3</div><div class="phase-label">Plano</div></div>
+</div>
+
+<div class="main">
+  <div id="canvasViewport">
+    <div class="empty-state">
+      <span class="empty-icon">🏠</span>
+      <div class="empty-title">Tu plano aparecerá aquí</div>
+      <div class="empty-text">Abre el panel, añade habitaciones<br>con una o más fotos cada una,<br>y pulsa <em>Analizar y ordenar</em>.</div>
+    </div>
+  </div>
+
+  <div class="legend" id="legend">
+    <div style="font-size:0.52rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.15rem">Leyenda</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4a9eff"></div>Paredes</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--door)"></div>Puertas</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--win)"></div>Ventanas</div>
+    <div class="legend-item" id="legendConn" style="display:none"><div class="legend-dot" style="background:var(--conn)"></div>Conexiones</div>
+  </div>
+
+  <div class="sheet collapsed" id="sheet">
+    <div class="sheet-handle-area" id="sheetHandle" onclick="toggleSheet()">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span class="sheet-title" id="sheetTitle">Habitaciones</span>
+        <button class="sheet-toggle-btn" id="sheetToggleBtn">▲</button>
+      </div>
+    </div>
+
+    <div class="sheet-body" id="sheetBody">
+
+      <!-- PHASE 1 -->
+      <div id="phase1content">
+        <!-- Nueva habitación -->
+        <div class="section-label">Nueva habitación</div>
+        <div class="room-name-row">
+          <input type="text" id="roomNameInput" placeholder="Nombre (ej: Salón, Cocina…)">
+        </div>
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept="image/*" multiple capture="environment">
+          <div class="upload-hint">📷 <strong>Toca para añadir fotos</strong><br>Puedes añadir varios ángulos<br>de la misma habitación</div>
+        </div>
+
+        <!-- Lista de habitaciones -->
+        <div class="section-label" style="margin-top:0.75rem" id="roomsHeader" style="display:none">Habitaciones añadidas</div>
+        <div class="room-list" id="roomList"></div>
+        <div id="roomsCount" style="font-size:0.6rem;color:var(--muted);text-align:center;margin-bottom:0.75rem"></div>
+
+        <button class="btn" id="generateBtn" disabled onclick="runPhase1()">▶ Analizar y ordenar</button>
+      </div>
+
+      <!-- PHASE 2 -->
+      <div id="phase2content" style="display:none">
+        <div style="font-size:0.65rem;color:var(--muted);line-height:1.7;margin-bottom:0.75rem">Arrastra las habitaciones para reordenarlas. Conecta las adyacentes.</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="toggleConnectMode()" id="connectBtn">⬡ Conectar</button>
+          <button class="btn btn-ghost" onclick="autoLayout()">↺ Auto</button>
+        </div>
+        <div class="connect-hint" id="connectHint">Toca dos habitaciones para conectarlas</div>
+        <div class="conn-list" id="connList"><div class="conn-empty">Sin conexiones aún</div></div>
+        <button class="btn" onclick="runPhase3()">▶ Generar plano final</button>
+      </div>
+
+      <!-- PHASE 3 -->
+      <div id="phase3content" style="display:none">
+        <div style="font-size:0.65rem;color:var(--muted);line-height:1.7;margin-bottom:0.75rem">Plano generado. Descárgalo o vuelve a editar el layout.</div>
+        <button class="btn" onclick="downloadSVG()">↓ Descargar SVG</button>
+        <button class="btn btn-ghost" onclick="backToPhase2()">← Volver a ordenar</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── STATE ── */
+var rooms = [];        // [{id, name, photos:[{dataUrl,file}], status, data, x,y,w,h}]
+var connections = [];  // [{a:roomId, b:roomId}]
+var connectMode = false;
+var connectFirst = null;
+var currentPhase = 1;
+var svgContent = '';
+var sheetOpen = false;
+var pendingPhotos = []; // photos staged before creating the room
+
+var COLORS = [
+  {fill:'#0d1f0d',stroke:'#1a5c1a',text:'#4dcc4d'},
+  {fill:'#1a0d1a',stroke:'#5c1a5c',text:'#cc4dcc'},
+  {fill:'#0d1a1a',stroke:'#1a5c5c',text:'#4dcccc'},
+  {fill:'#1a1a0d',stroke:'#5c5c1a',text:'#cccc4d'},
+  {fill:'#1a0d0d',stroke:'#5c1a1a',text:'#cc4d4d'},
+  {fill:'#0d0d1a',stroke:'#1a1a5c',text:'#4d4dcc'},
+  {fill:'#0d1510',stroke:'#1a4d33',text:'#4dcc99'},
+  {fill:'#15100d',stroke:'#4d331a',text:'#cc994d'},
+];
+
+/* ── SHEET ── */
+var sheetEl = document.getElementById('sheet');
+var sheetToggleBtn = document.getElementById('sheetToggleBtn');
+function toggleSheet() {
+  sheetOpen = !sheetOpen;
+  sheetEl.className = 'sheet ' + (sheetOpen ? 'expanded' : 'collapsed');
+  sheetToggleBtn.textContent = sheetOpen ? '▼' : '▲';
+}
+(function(){
+  var h = document.getElementById('sheetHandle'), startY;
+  h.addEventListener('touchstart', function(e){ startY = e.touches[0].clientY; }, {passive:true});
+  h.addEventListener('touchend', function(e){
+    var dy = e.changedTouches[0].clientY - startY;
+    if (Math.abs(dy) > 30) { sheetOpen = dy < 0; sheetEl.className = 'sheet ' + (sheetOpen?'expanded':'collapsed'); sheetToggleBtn.textContent = sheetOpen?'▼':'▲'; }
+  }, {passive:true});
+})();
+
+/* ── UPLOAD: new room from file input ── */
+var uploadZone = document.getElementById('uploadZone');
+var fileInput = document.getElementById('fileInput');
+uploadZone.addEventListener('dragover', function(e){ e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', function(){ uploadZone.classList.remove('drag-over'); });
+uploadZone.addEventListener('drop', function(e){ e.preventDefault(); uploadZone.classList.remove('drag-over'); handleNewRoomFiles(Array.from(e.dataTransfer.files)); });
+fileInput.addEventListener('change', function(e){ handleNewRoomFiles(Array.from(e.target.files)); fileInput.value = ''; });
+
+function handleNewRoomFiles(files) {
+  var imgs = files.filter(function(f){ return f.type.startsWith('image/'); });
+  if (!imgs.length) { showToast('Solo se aceptan imágenes'); return; }
+
+  var name = document.getElementById('roomNameInput').value.trim() || ('Habitación ' + (rooms.length + 1));
+  document.getElementById('roomNameInput').value = '';
+
+  // Read all files then create the room
+  var photos = [];
+  var loaded = 0;
+  imgs.forEach(function(file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      photos.push({ dataUrl: e.target.result, file: file });
+      loaded++;
+      if (loaded === imgs.length) {
+        createRoom(name, photos);
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function createRoom(name, photos) {
+  var id = Date.now() + Math.random();
+  rooms.push({ id:id, name:name, photos:photos, status:'pending', data:null, x:0, y:0, w:0, h:0 });
+  renderRoomList();
+  updateButtons();
+}
+
+/* ── ADD MORE PHOTOS TO EXISTING ROOM ── */
+function handleAddPhotos(roomId, files) {
+  var room = rooms.find(function(r){ return r.id === roomId; });
+  if (!room) return;
+  var imgs = files.filter(function(f){ return f.type.startsWith('image/'); });
+  if (!imgs.length) return;
+  var loaded = 0;
+  imgs.forEach(function(file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      room.photos.push({ dataUrl: e.target.result, file: file });
+      loaded++;
+      if (loaded === imgs.length) { renderRoomList(); }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function removePhoto(roomId, photoIdx) {
+  var room = rooms.find(function(r){ return r.id === roomId; });
+  if (!room) return;
+  room.photos.splice(photoIdx, 1);
+  if (room.photos.length === 0) {
+    removeRoom(roomId);
+  } else {
+    renderRoomList();
+  }
+}
+
+function removeRoom(id) {
+  rooms = rooms.filter(function(r){ return r.id !== id; });
+  connections = connections.filter(function(c){ return c.a !== id && c.b !== id; });
+  renderRoomList();
+  updateButtons();
+}
+
+/* ── RENDER ROOM LIST ── */
+function renderRoomList() {
+  var list = document.getElementById('roomList');
+  var count = document.getElementById('roomsCount');
+  var header = document.getElementById('roomsHeader');
+
+  if (!rooms.length) {
+    list.innerHTML = '';
+    count.textContent = '';
+    return;
+  }
+
+  list.innerHTML = rooms.map(function(r, i) {
+    var c = COLORS[i % COLORS.length];
+    var sc = r.status==='analyzed'?'ok':r.status==='analyzing'?'busy':r.status==='error'?'err':'';
+    var st = r.status==='pending'?'':r.status==='analyzing'?'⟳ analizando…':r.status==='analyzed'?'✓ lista':'✗ error';
+
+    var photos = r.photos.map(function(p, pi) {
+      return '<div class="photo-thumb-wrap">'
+        + '<img class="photo-thumb" src="' + p.dataUrl + '">'
+        + '<button class="photo-thumb-remove" onclick="removePhoto(' + r.id + ',' + pi + ')">✕</button>'
+        + '</div>';
+    }).join('');
+
+    // "add more" button — hidden input trick
+    var addBtn = '<label class="photo-add-btn">'
+      + '<input type="file" accept="image/*" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="handleAddPhotos(' + r.id + ',Array.from(this.files));this.value=\'\'">'
+      + '<span class="photo-add-icon">＋</span>'
+      + '<span>foto</span>'
+      + '</label>';
+
+    return '<div class="room-card ' + r.status + '" id="rc-' + r.id + '">'
+      + '<div class="room-card-header">'
+      + '<div class="room-card-color" style="background:' + c.text + '"></div>'
+      + '<div class="room-card-name">' + r.name + '</div>'
+      + '<div class="room-card-status ' + sc + '">' + st + '</div>'
+      + '<button class="room-card-remove" onclick="removeRoom(' + r.id + ')" title="Eliminar habitación">✕</button>'
+      + '</div>'
+      + '<div class="photo-strip">' + photos + addBtn + '</div>'
+      + '<div class="photo-count-badge">' + r.photos.length + ' foto' + (r.photos.length !== 1 ? 's' : '') + '</div>'
+      + '</div>';
+  }).join('');
+
+  count.textContent = rooms.length + ' habitación' + (rooms.length !== 1 ? 'es' : '');
+}
+
+function updateButtons() {
+  document.getElementById('generateBtn').disabled = rooms.length === 0;
+}
+
+/* ── PHASE 1: ANALYZE ── */
+async function runPhase1() {
+  if (!rooms.length) return;
+  var btn = document.getElementById('generateBtn');
+  btn.disabled = true; btn.textContent = '⟳ Analizando…';
+  setPhase(1);
+  showLoading('Analizando habitaciones con IA…');
+
+  var steps = ['Procesando imágenes…','Detectando geometría…','Analizando ángulos múltiples…','Identificando puertas y ventanas…','Calculando layout óptimo…'];
+  var si = 0;
+  var stepEl = document.getElementById('loadingStep');
+  var interval = setInterval(function(){ if(stepEl && si < steps.length) stepEl.textContent = steps[si++]; }, 1000);
+
+  try {
+    await Promise.all(rooms.map(async function(r) {
+      try {
+        r.status = 'analyzing'; renderRoomList();
+        r.data = await analyzeRoom(r);
+        r.status = 'analyzed';
+      } catch(e) {
+        console.error('Error analyzing', r.name, e);
+        r.data = defaultData(r.name);
+        r.status = 'error';
+      }
+      renderRoomList();
+    }));
+
+    if (stepEl) stepEl.textContent = 'Infiriendo layout…';
+    var layout = await inferLayout(rooms);
+    applyLayout(layout);
+
+    clearInterval(interval);
+    setPhase(2);
+    renderDragCanvas();
+    btn.textContent = '▶ Analizar y ordenar'; btn.disabled = false;
+    showToast('Habitaciones analizadas · Ajusta si es necesario');
+
+  } catch(e) {
+    clearInterval(interval);
+    console.error(e);
+    showToast('Error: ' + e.message);
+    btn.textContent = '▶ Analizar y ordenar'; btn.disabled = false;
+    showEmpty();
+  }
+}
+
+/* ── ANALYZE ROOM (multi-photo) ── */
+async function analyzeRoom(room) {
+  var prompt = 'Analiza estas ' + room.photos.length + ' foto' + (room.photos.length > 1 ? 's' : '') + ' de la misma habitación tomadas desde ángulos diferentes. '
+    + 'Sintetiza la geometría real del espacio considerando todos los ángulos para obtener una estimación más precisa. '
+    + 'Devuelve SOLO JSON válido sin backticks ni texto adicional:\n'
+    + '{"roomType":"salon|cocina|dormitorio|bano|aseo|pasillo|hall|terraza|comedor|estudio|trastero|garaje",'
+    + '"widthRatio":1.2,'
+    + '"doors":[{"wall":"north|south|east|west","position":0.5,"isDouble":false}],'
+    + '"windows":[{"wall":"north|south|east|west","position":0.5,"width":"small|medium|large"}],'
+    + '"features":[],'
+    + '"confidence":0.8,'
+    + '"photoNotes":"breve descripción de lo inferido de los distintos ángulos"}\n'
+    + 'widthRatio: proporción ancho/largo real del espacio (0.4-2.5). Con varios ángulos puedes inferirlo con más precisión.';
+
+  // Build content array: all images + the prompt text
+  var content = room.photos.map(function(p) {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] }
+    };
+  });
+  content.push({ type: 'text', text: prompt });
+
+  var resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 800,
+      messages: [{ role: 'user', content: content }]
+    })
+  });
+  if (!resp.ok) throw new Error('API ' + resp.status);
+  var d = await resp.json();
+  var text = d.content.map(function(b){ return b.text || ''; }).join('');
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+/* ── INFER LAYOUT ── */
+async function inferLayout(rooms) {
+  var summary = rooms.map(function(r, i) {
+    var d = r.data || {};
+    return { index:i, name:r.name, type:d.roomType||'habitacion', widthRatio:d.widthRatio||1, doors:(d.doors||[]).length, windows:(d.windows||[]).length, photos:r.photos.length };
+  });
+  var prompt = 'Eres un arquitecto. Propón el layout más realista para estas habitaciones de una vivienda.\n\n'
+    + 'Habitaciones:\n' + JSON.stringify(summary, null, 2) + '\n\n'
+    + 'Reglas: pasillo/hall en el centro, baño junto a dormitorios, cocina junto al comedor/salón.\n'
+    + 'Devuelve SOLO JSON sin backticks:\n'
+    + '{"rooms":[{"index":0,"col":1,"row":0,"connections":[1,2]}],"explanation":"breve"}';
+
+  var resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:800, messages:[{role:'user',content:prompt}] })
+  });
+  if (!resp.ok) throw new Error('Layout API ' + resp.status);
+  var d = await resp.json();
+  var text = d.content.map(function(b){ return b.text || ''; }).join('');
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+/* ── APPLY LAYOUT ── */
+function applyLayout(layout) {
+  connections = [];
+  var CELL = 150, PAD = 32;
+  var sizeMap = {salon:1.5,comedor:1.3,dormitorio:1.2,estudio:1.1,cocina:1.0,bano:0.65,aseo:0.55,pasillo:0.85,terraza:1.1,hall:0.9,trastero:0.7,garaje:1.4};
+  layout.rooms.forEach(function(lr) {
+    var room = rooms[lr.index]; if (!room) return;
+    var d = room.data || {};
+    var ratio = Math.max(0.4, Math.min(2.5, d.widthRatio || 1));
+    var sf = sizeMap[d.roomType || 'dormitorio'] || 1.0;
+    var h = Math.round(CELL * sf), w = Math.round(h * ratio);
+    room.x = PAD + lr.col * (CELL + PAD); room.y = PAD + lr.row * (CELL + PAD);
+    room.w = w; room.h = h;
+    (lr.connections || []).forEach(function(ci) {
+      if (ci > lr.index && rooms[ci]) connections.push({a: room.id, b: rooms[ci].id});
+    });
+  });
+  fixOverlaps();
+}
+
+function fixOverlaps() {
+  for (var i = 0; i < rooms.length; i++) for (var j = i+1; j < rooms.length; j++) {
+    var a = rooms[i], b = rooms[j];
+    if (!(a.x+a.w+8 < b.x || b.x+b.w+8 < a.x || a.y+a.h+8 < b.y || b.y+b.h+8 < a.y)) b.x = a.x + a.w + 20;
+  }
+}
+
+/* ── DRAG CANVAS ── */
+function renderDragCanvas() {
+  var vp = document.getElementById('canvasViewport');
+  vp.innerHTML = '';
+
+  var cw = Math.max(600, rooms.reduce(function(m,r){ return Math.max(m, r.x+r.w); }, 0) + 60);
+  var ch = Math.max(400, rooms.reduce(function(m,r){ return Math.max(m, r.y+r.h); }, 0) + 60);
+
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'width:100%;height:100%;overflow:auto;-webkit-overflow-scrolling:touch;position:relative;';
+
+  var canvas = document.createElement('div');
+  canvas.id = 'dragCanvas';
+  canvas.style.cssText = 'position:relative;background:#0a0a0a;width:'+cw+'px;height:'+ch+'px;';
+
+  var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.id = 'connSvg'; svg.setAttribute('width',cw); svg.setAttribute('height',ch);
+  svg.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+  canvas.appendChild(svg);
+
+  rooms.forEach(function(room, i) {
+    var c = COLORS[i % COLORS.length];
+    var d = room.data || {};
+    var el = document.createElement('div');
+    el.className = 'drag-room'; el.id = 'dr-' + room.id;
+    el.style.cssText = 'left:'+room.x+'px;top:'+room.y+'px;width:'+room.w+'px;height:'+room.h+'px;background:'+c.fill+';border-color:'+c.stroke+';';
+
+    // Show first photo as background thumbnail
+    var bgStyle = room.photos.length
+      ? 'background-image:url('+room.photos[0].dataUrl+');background-size:cover;background-position:center;'
+      : '';
+    if (bgStyle) el.style.cssText += bgStyle;
+
+    // Overlay tint so text is readable
+    el.innerHTML = '<div style="position:absolute;inset:0;background:' + c.fill + ';opacity:0.72;border-radius:2px;"></div>'
+      + '<div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;">'
+      + '<div class="drag-room-label" style="color:'+c.text+'">'+rlabel(d.roomType, room.name)+'</div>'
+      + '<div class="drag-room-sub">'+room.name+'</div>'
+      + (room.photos.length > 1 ? '<div style="font-size:0.42rem;color:'+c.text+';opacity:0.6;margin-top:2px;">📷 '+room.photos.length+' ángulos</div>' : '')
+      + '</div>';
+
+    setupDrag(el, room, canvas);
+    el.addEventListener('click', function(){ onRoomClick(room, el); });
+    canvas.appendChild(el);
+  });
+
+  wrap.appendChild(canvas);
+  vp.appendChild(wrap);
+  drawConns();
+  showPhase2Sheet();
+}
+
+function setupDrag(el, room, canvas) {
+  el.addEventListener('mousedown', function(e) {
+    if (connectMode) return; e.preventDefault();
+    var ox = e.clientX - room.x, oy = e.clientY - room.y;
+    function mv(e2){ room.x=Math.max(0,e2.clientX-ox); room.y=Math.max(0,e2.clientY-oy); el.style.left=room.x+'px'; el.style.top=room.y+'px'; drawConns(); }
+    function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
+    document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
+  });
+  el.addEventListener('touchstart', function(e) {
+    if (connectMode) return; if (e.touches.length !== 1) return; e.stopPropagation();
+    var t = e.touches[0], ox = t.clientX - room.x, oy = t.clientY - room.y;
+    function mv(e2){ if(e2.touches.length!==1) return; var t2=e2.touches[0]; room.x=Math.max(0,t2.clientX-ox); room.y=Math.max(0,t2.clientY-oy); el.style.left=room.x+'px'; el.style.top=room.y+'px'; drawConns(); e2.preventDefault(); }
+    function up(){ el.removeEventListener('touchmove',mv); el.removeEventListener('touchend',up); }
+    el.addEventListener('touchmove',mv,{passive:false}); el.addEventListener('touchend',up);
+  }, {passive:true});
+}
+
+function drawConns() {
+  var svg = document.getElementById('connSvg'); if (!svg) return;
+  svg.innerHTML = connections.map(function(c) {
+    var a = rooms.find(function(r){ return r.id===c.a; }), b = rooms.find(function(r){ return r.id===c.b; });
+    if (!a || !b) return '';
+    var x1=a.x+a.w/2, y1=a.y+a.h/2, x2=b.x+b.w/2, y2=b.y+b.h/2;
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#c8f542" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.45"/>'
+      + '<circle cx="'+x1+'" cy="'+y1+'" r="3" fill="#c8f542" opacity="0.35"/>'
+      + '<circle cx="'+x2+'" cy="'+y2+'" r="3" fill="#c8f542" opacity="0.35"/>';
+  }).join('');
+}
+
+function onRoomClick(room, el) {
+  if (!connectMode) return;
+  if (!connectFirst) { connectFirst = room; el.classList.add('selected'); showToast('Ahora toca la habitación adyacente'); return; }
+  if (connectFirst.id === room.id) { connectFirst = null; el.classList.remove('selected'); return; }
+  var exists = connections.some(function(c){ return (c.a===connectFirst.id&&c.b===room.id)||(c.a===room.id&&c.b===connectFirst.id); });
+  if (!exists) connections.push({a: connectFirst.id, b: room.id});
+  document.querySelectorAll('.drag-room.selected').forEach(function(e){ e.classList.remove('selected'); });
+  connectFirst = null; drawConns(); renderConnList(); showToast('Conexión añadida');
+}
+
+function toggleConnectMode() {
+  connectMode = !connectMode; connectFirst = null;
+  document.querySelectorAll('.drag-room.selected').forEach(function(e){ e.classList.remove('selected'); });
+  var btn = document.getElementById('connectBtn'), hint = document.getElementById('connectHint');
+  if (connectMode) { btn.style.borderColor='var(--accent)'; btn.style.color='var(--accent)'; hint.style.display='block'; }
+  else { btn.style.borderColor=''; btn.style.color=''; hint.style.display='none'; }
+}
+
+function autoLayout() {
+  var CELL=150, PAD=32;
+  var sizeMap={salon:1.5,comedor:1.3,dormitorio:1.2,estudio:1.1,cocina:1.0,bano:0.65,aseo:0.55,pasillo:0.85,terraza:1.1,hall:0.9};
+  rooms.forEach(function(r,i){
+    var d=r.data||{}, col=i%3, row=Math.floor(i/3);
+    var ratio=Math.max(0.4,Math.min(2.5,d.widthRatio||1));
+    var sf=sizeMap[d.roomType||'dormitorio']||1.0;
+    var h=Math.round(CELL*sf), w=Math.round(h*ratio);
+    r.x=PAD+col*(CELL+PAD); r.y=PAD+row*(CELL+PAD); r.w=w; r.h=h;
+    var el=document.getElementById('dr-'+r.id);
+    if(el){ el.style.left=r.x+'px'; el.style.top=r.y+'px'; el.style.width=r.w+'px'; el.style.height=r.h+'px'; }
+  });
+  drawConns();
+}
+
+function renderConnList() {
+  var list = document.getElementById('connList');
+  if (!connections.length) { list.innerHTML='<div class="conn-empty">Sin conexiones aún</div>'; return; }
+  list.innerHTML = connections.map(function(c,i){
+    var a=rooms.find(function(r){return r.id===c.a;}), b=rooms.find(function(r){return r.id===c.b;});
+    if(!a||!b) return '';
+    return '<div class="conn-item"><div class="conn-dot"></div>'+a.name+' ↔ '+b.name+'<button class="conn-remove" onclick="removeConn('+i+')">✕</button></div>';
+  }).join('');
+}
+
+function removeConn(i) { connections.splice(i,1); drawConns(); renderConnList(); }
+
+/* ── PHASE 3: SVG ── */
+function runPhase3() {
+  setPhase(3);
+  svgContent = buildSVG();
+  var vp = document.getElementById('canvasViewport');
+  vp.style.overflow = 'auto'; vp.style.alignItems = 'flex-start'; vp.style.justifyContent = 'flex-start'; vp.style.padding = '1rem';
+  vp.innerHTML = svgContent;
+  document.getElementById('legend').style.display = 'flex';
+  document.getElementById('legendConn').style.display = 'flex';
+  showPhase3Sheet();
+  showToast('Plano final generado');
+}
+
+function backToPhase2() {
+  setPhase(2);
+  var vp = document.getElementById('canvasViewport');
+  vp.style.overflow=''; vp.style.alignItems=''; vp.style.justifyContent=''; vp.style.padding='';
+  document.getElementById('legend').style.display='none';
+  renderDragCanvas();
+}
+
+function buildSVG() {
+  var PAD=32;
+  var W = rooms.reduce(function(m,r){ return Math.max(m,r.x+r.w); },0)+PAD;
+  var H = rooms.reduce(function(m,r){ return Math.max(m,r.y+r.h); },0)+PAD;
+  var FN="'DM Mono',monospace";
+  var s = '<svg id="floorplan-svg" xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'
+    +'<defs><pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0L0 0 0 20" fill="none" stroke="#161612" stroke-width="0.5"/></pattern>'
+    +'<filter id="gl"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'
+    +'<rect width="100%" height="100%" fill="#0a0a0a"/><rect width="100%" height="100%" fill="url(#g)"/>';
+
+  connections.forEach(function(c){
+    var a=rooms.find(function(r){return r.id===c.a;}), b=rooms.find(function(r){return r.id===c.b;});
+    if(!a||!b) return;
+    s+='<line x1="'+(a.x+a.w/2)+'" y1="'+(a.y+a.h/2)+'" x2="'+(b.x+b.w/2)+'" y2="'+(b.y+b.h/2)+'" stroke="#c8f542" stroke-width="1" stroke-dasharray="5,4" opacity="0.2"/>';
+  });
+
+  rooms.forEach(function(room,i){
+    var c=COLORS[i%COLORS.length], d=room.data||{};
+    var x=room.x,y=room.y,w=room.w,h=room.h;
+    s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+c.fill+'" stroke="'+c.stroke+'" stroke-width="2.5" rx="1"/>';
+    s+='<text x="'+(x+w/2)+'" y="'+(y+h/2-5)+'" text-anchor="middle" font-family="'+FN+'" font-size="9" fill="'+c.text+'" opacity="0.9">'+rlabel(d.roomType,room.name)+'</text>';
+    s+='<text x="'+(x+w/2)+'" y="'+(y+h/2+9)+'" text-anchor="middle" font-family="'+FN+'" font-size="7" fill="#555544" opacity="0.7">'+room.name+'</text>';
+    if(room.photos.length>1) s+='<text x="'+(x+w/2)+'" y="'+(y+h/2+19)+'" text-anchor="middle" font-family="'+FN+'" font-size="6" fill="'+c.text+'" opacity="0.4">📷 '+room.photos.length+'</text>';
+
+    (d.doors||[]).forEach(function(door){
+      var dp=Math.max(0.1,Math.min(0.9,door.position||0.5)), dw=door.isDouble?18:12;
+      if(door.wall==='north'){var dx=x+w*dp;s+='<line x1="'+(dx-dw/2)+'" y1="'+y+'" x2="'+(dx+dw/2)+'" y2="'+y+'" stroke="#ff8c42" stroke-width="2.5" stroke-linecap="round" filter="url(#gl)"/><path d="M'+(dx-dw/2)+' '+y+' Q'+(dx-dw/2)+' '+(y-dw/2)+' '+dx+' '+(y-dw/2)+'" fill="none" stroke="#ff8c42" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.4"/>';}
+      else if(door.wall==='south'){var dx=x+w*dp;s+='<line x1="'+(dx-dw/2)+'" y1="'+(y+h)+'" x2="'+(dx+dw/2)+'" y2="'+(y+h)+'" stroke="#ff8c42" stroke-width="2.5" stroke-linecap="round" filter="url(#gl)"/><path d="M'+(dx-dw/2)+' '+(y+h)+' Q'+(dx-dw/2)+' '+(y+h+dw/2)+' '+dx+' '+(y+h+dw/2)+'" fill="none" stroke="#ff8c42" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.4"/>';}
+      else if(door.wall==='west'){var dy=y+h*dp;s+='<line x1="'+x+'" y1="'+(dy-dw/2)+'" x2="'+x+'" y2="'+(dy+dw/2)+'" stroke="#ff8c42" stroke-width="2.5" stroke-linecap="round" filter="url(#gl)"/>';}
+      else if(door.wall==='east'){var dy=y+h*dp;s+='<line x1="'+(x+w)+'" y1="'+(dy-dw/2)+'" x2="'+(x+w)+'" y2="'+(dy+dw/2)+'" stroke="#ff8c42" stroke-width="2.5" stroke-linecap="round" filter="url(#gl)"/>';}
+    });
+    (d.windows||[]).forEach(function(win){
+      var wp=Math.max(0.15,Math.min(0.85,win.position||0.5)), ww=win.width==='large'?20:win.width==='medium'?13:9;
+      if(win.wall==='north'){var wx=x+w*wp;s+='<line x1="'+(wx-ww/2)+'" y1="'+y+'" x2="'+(wx+ww/2)+'" y2="'+y+'" stroke="#42d4ff" stroke-width="2.5" filter="url(#gl)"/>';}
+      else if(win.wall==='south'){var wx=x+w*wp;s+='<line x1="'+(wx-ww/2)+'" y1="'+(y+h)+'" x2="'+(wx+ww/2)+'" y2="'+(y+h)+'" stroke="#42d4ff" stroke-width="2.5" filter="url(#gl)"/>';}
+      else if(win.wall==='west'){var wy=y+h*wp;s+='<line x1="'+x+'" y1="'+(wy-ww/2)+'" x2="'+x+'" y2="'+(wy+ww/2)+'" stroke="#42d4ff" stroke-width="2.5" filter="url(#gl)"/>';}
+      else if(win.wall==='east'){var wy=y+h*wp;s+='<line x1="'+(x+w)+'" y1="'+(wy-ww/2)+'" x2="'+(x+w)+'" y2="'+(wy+ww/2)+'" stroke="#42d4ff" stroke-width="2.5" filter="url(#gl)"/>';}
+    });
+  });
+
+  s+='<g transform="translate('+(W-28)+',22)"><circle cx="0" cy="0" r="12" fill="none" stroke="#2e2e28" stroke-width="1"/><text x="0" y="-1" text-anchor="middle" font-family="'+FN+'" font-size="8" fill="#c8f542" font-weight="bold">N</text><polygon points="0,-11 -2.5,-4 0,-6 2.5,-4" fill="#c8f542"/></g>';
+  return s + '</svg>';
+}
+
+/* ── HELPERS ── */
+function rlabel(type, fb) {
+  var m={salon:'SALÓN',comedor:'COMEDOR',cocina:'COCINA',dormitorio:'DORM.',bano:'BAÑO',aseo:'ASEO',pasillo:'PASILLO',hall:'HALL',terraza:'TERRAZA',estudio:'ESTUDIO',trastero:'TRASTERO',garaje:'GARAJE'};
+  return m[type] || (fb||'HAB.').substring(0,8).toUpperCase();
+}
+
+function defaultData(name) {
+  var n = (name||'').toLowerCase();
+  if(n.includes('ba')||n.includes('aseo')) return {roomType:'bano',widthRatio:0.65,doors:[{wall:'south',position:0.5,isDouble:false}],windows:[{wall:'north',position:0.5,width:'small'}],features:[]};
+  if(n.includes('cocina')) return {roomType:'cocina',widthRatio:0.8,doors:[{wall:'east',position:0.5,isDouble:false}],windows:[{wall:'north',position:0.5,width:'medium'}],features:[]};
+  if(n.includes('pasillo')||n.includes('hall')) return {roomType:'pasillo',widthRatio:0.35,doors:[{wall:'north',position:0.5,isDouble:false},{wall:'south',position:0.5,isDouble:false}],windows:[],features:[]};
+  if(n.includes('sal')||n.includes('estar')) return {roomType:'salon',widthRatio:1.5,doors:[{wall:'south',position:0.3,isDouble:false}],windows:[{wall:'north',position:0.5,width:'large'}],features:[]};
+  return {roomType:'dormitorio',widthRatio:1.2,doors:[{wall:'south',position:0.3,isDouble:false}],windows:[{wall:'north',position:0.5,width:'medium'}],features:[]};
+}
+
+function setPhase(n) {
+  currentPhase = n;
+  [1,2,3].forEach(function(i){ document.getElementById('ptab'+i).className='phase-tab'+(i===n?' active':i<n?' done':''); });
+}
+
+function showLoading(msg) {
+  var vp = document.getElementById('canvasViewport');
+  vp.innerHTML = '<div class="loading-state"><div class="loading-grid">'+Array(9).fill('<div class="loading-cell"></div>').join('')+'</div><div class="loading-text">'+(msg||'Procesando…')+'</div><div class="loading-step" id="loadingStep">Iniciando…</div></div>';
+  document.getElementById('legend').style.display = 'none';
+}
+
+function showEmpty() {
+  document.getElementById('canvasViewport').innerHTML = '<div class="empty-state"><span class="empty-icon">🏠</span><div class="empty-title">Tu plano aparecerá aquí</div><div class="empty-text">Sube fotos y pulsa <em>Analizar y ordenar</em>.</div></div>';
+}
+
+function showPhase2Sheet() {
+  document.getElementById('phase1content').style.display='none';
+  document.getElementById('phase2content').style.display='block';
+  document.getElementById('phase3content').style.display='none';
+  document.getElementById('sheetTitle').textContent='Ordenar habitaciones';
+  renderConnList();
+  sheetOpen=true; sheetEl.className='sheet expanded'; sheetToggleBtn.textContent='▼';
+}
+
+function showPhase3Sheet() {
+  document.getElementById('phase1content').style.display='none';
+  document.getElementById('phase2content').style.display='none';
+  document.getElementById('phase3content').style.display='block';
+  document.getElementById('sheetTitle').textContent='Plano generado';
+  sheetOpen=true; sheetEl.className='sheet expanded'; sheetToggleBtn.textContent='▼';
+}
+
+function downloadSVG() {
+  if (!svgContent) return;
+  var blob = new Blob([svgContent],{type:'image/svg+xml'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href=url; a.download='planimetro.svg'; a.click();
+  URL.revokeObjectURL(url);
+  showToast('SVG descargado');
+}
+
+function resetAll() {
+  rooms=[]; connections=[]; connectMode=false; connectFirst=null; svgContent='';
+  setPhase(1); renderRoomList(); updateButtons(); showEmpty();
+  document.getElementById('phase1content').style.display='block';
+  document.getElementById('phase2content').style.display='none';
+  document.getElementById('phase3content').style.display='none';
+  document.getElementById('sheetTitle').textContent='Habitaciones';
+  document.getElementById('generateBtn').textContent='▶ Analizar y ordenar';
+  document.getElementById('generateBtn').disabled=true;
+  document.getElementById('legend').style.display='none';
+  var vp=document.getElementById('canvasViewport');
+  vp.style.overflow=''; vp.style.alignItems=''; vp.style.justifyContent=''; vp.style.padding='';
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2800);
+}
+</script>
+</body>
+</html>
