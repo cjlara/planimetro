@@ -83,7 +83,10 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 .sheet-header { width:100%; display:flex; align-items:center; justify-content:space-between; }
 .sheet-title { font-size:0.65rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); }
 .sheet-toggle-btn { background:none; border:none; color:var(--muted); font-size:0.65rem; cursor:pointer; padding:0.25rem; min-width:24px; min-height:24px; }
-.sheet-body { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; padding:0.75rem 1rem 0; }
+/* Sticky top area always visible in peek mode */
+.sheet-sticky { padding:0.75rem 1rem 0; flex-shrink:0; }
+/* Scrollable area only for room cards */
+.sheet-body { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; padding:0 1rem 0.75rem; }
 .sheet-body::-webkit-scrollbar { display:none; }
 
 /* UPLOAD ZONE */
@@ -136,8 +139,10 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 .photo-add-btn input { position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; }
 .photo-add-icon { font-size:1.1rem; line-height:1; }
 
-/* photo count badge */
-.photo-count-badge { font-size:0.5rem; color:var(--muted); padding:0 0.65rem 0.5rem; }
+/* Editable room name */
+.room-card-name-input { flex:1; background:transparent; border:none; border-bottom:1px solid transparent; color:var(--text); font-family:'DM Mono',monospace; font-size:0.72rem; font-weight:500; min-width:0; outline:none; cursor:text; padding:0; transition:border-color 0.15s; }
+.room-card-name-input:focus { border-bottom-color:var(--accent); }
+.room-card-name-input::placeholder { color:var(--muted); }
 
 /* BUTTONS */
 .btn { background:var(--accent); color:#0f0f0d; border:none; border-radius:8px; font-family:'DM Mono',monospace; font-size:0.72rem; font-weight:500; letter-spacing:0.06em; padding:0.75rem 1rem; cursor:pointer; transition:all 0.15s; white-space:nowrap; min-height:44px; display:flex; align-items:center; justify-content:center; gap:0.4rem; width:100%; margin-bottom:0.5rem; }
@@ -170,7 +175,8 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
   #canvasViewport { flex:1; overflow:auto; align-items:flex-start; justify-content:flex-start; padding:1.5rem; touch-action:auto; }
   .sheet { position:static; transform:none !important; width:300px; max-height:none; border-radius:0; border-top:none; border-left:1px solid var(--border); flex-direction:column; order:-1; }
   .sheet-handle-area { display:none; }
-  .sheet-body { flex:1; padding:1rem; }
+  .sheet-sticky { padding:1rem 1rem 0; }
+  .sheet-body { flex:1; padding:0 1rem 1rem; }
   .legend { top:1.25rem; right:1.25rem; }
   :root { --sheet-peek:0px; }
   .toast { bottom:2rem; }
@@ -222,47 +228,50 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
       </div>
     </div>
 
-    <div class="sheet-body" id="sheetBody">
-
-      <!-- PHASE 1 -->
-      <div id="phase1content">
-        <!-- Nueva habitación -->
-        <div class="section-label">Nueva habitación</div>
+    <!-- STICKY: always visible in peek, never scrolls away -->
+    <div class="sheet-sticky" id="sheetSticky">
+      <!-- PHASE 1 sticky -->
+      <div id="phase1sticky">
         <div class="room-name-row">
-          <input type="text" id="roomNameInput" placeholder="Nombre (ej: Salón, Cocina…)">
+          <input type="text" id="roomNameInput" placeholder="Nombre de la habitación (ej: Salón)">
         </div>
         <div class="upload-zone" id="uploadZone">
           <input type="file" id="fileInput" accept="image/*" multiple capture="environment">
-          <div class="upload-hint">📷 <strong>Toca para añadir fotos</strong><br>Puedes añadir varios ángulos<br>de la misma habitación</div>
+          <div class="upload-hint">📷 <strong>Toca para añadir fotos</strong><br>Varios ángulos por habitación</div>
         </div>
-
-        <!-- Lista de habitaciones -->
-        <div class="section-label" style="margin-top:0.75rem" id="roomsHeader" style="display:none">Habitaciones añadidas</div>
-        <div class="room-list" id="roomList"></div>
-        <div id="roomsCount" style="font-size:0.6rem;color:var(--muted);text-align:center;margin-bottom:0.75rem"></div>
-
-        <button class="btn" id="generateBtn" disabled onclick="runPhase1()">▶ Analizar y ordenar</button>
       </div>
-
-      <!-- PHASE 2 -->
-      <div id="phase2content" style="display:none">
-        <div style="font-size:0.65rem;color:var(--muted);line-height:1.7;margin-bottom:0.75rem">Arrastra las habitaciones para reordenarlas. Conecta las adyacentes.</div>
+      <!-- PHASE 2 sticky -->
+      <div id="phase2sticky" style="display:none">
+        <div style="font-size:0.65rem;color:var(--muted);line-height:1.6;margin-bottom:0.6rem">Arrastra para reordenar · Conecta habitaciones adyacentes</div>
         <div class="btn-row">
           <button class="btn btn-ghost" onclick="toggleConnectMode()" id="connectBtn">⬡ Conectar</button>
           <button class="btn btn-ghost" onclick="autoLayout()">↺ Auto</button>
         </div>
         <div class="connect-hint" id="connectHint">Toca dos habitaciones para conectarlas</div>
+      </div>
+      <!-- PHASE 3 sticky -->
+      <div id="phase3sticky" style="display:none">
+        <div style="font-size:0.65rem;color:var(--muted);line-height:1.6;margin-bottom:0.6rem">Plano generado · Descarga o vuelve a editar</div>
+        <button class="btn" onclick="downloadSVG()" style="margin-bottom:0.5rem">↓ Descargar SVG</button>
+        <button class="btn btn-ghost" onclick="backToPhase2()">← Volver a ordenar</button>
+      </div>
+    </div>
+
+    <!-- SCROLLABLE: room list + action buttons -->
+    <div class="sheet-body" id="sheetBody">
+      <!-- PHASE 1 scroll -->
+      <div id="phase1content">
+        <div class="room-list" id="roomList"></div>
+        <div id="roomsCount" style="font-size:0.6rem;color:var(--muted);text-align:center;margin-bottom:0.75rem"></div>
+        <button class="btn" id="generateBtn" disabled onclick="runPhase1()">▶ Analizar y ordenar</button>
+      </div>
+      <!-- PHASE 2 scroll -->
+      <div id="phase2content" style="display:none">
         <div class="conn-list" id="connList"><div class="conn-empty">Sin conexiones aún</div></div>
         <button class="btn" onclick="runPhase3()">▶ Generar plano final</button>
       </div>
-
-      <!-- PHASE 3 -->
-      <div id="phase3content" style="display:none">
-        <div style="font-size:0.65rem;color:var(--muted);line-height:1.7;margin-bottom:0.75rem">Plano generado. Descárgalo o vuelve a editar el layout.</div>
-        <button class="btn" onclick="downloadSVG()">↓ Descargar SVG</button>
-        <button class="btn btn-ghost" onclick="backToPhase2()">← Volver a ordenar</button>
-      </div>
-
+      <!-- PHASE 3 scroll (empty, actions are in sticky) -->
+      <div id="phase3content" style="display:none"></div>
     </div>
   </div>
 </div>
@@ -386,7 +395,6 @@ function removeRoom(id) {
 function renderRoomList() {
   var list = document.getElementById('roomList');
   var count = document.getElementById('roomsCount');
-  var header = document.getElementById('roomsHeader');
 
   if (!rooms.length) {
     list.innerHTML = '';
@@ -406,7 +414,6 @@ function renderRoomList() {
         + '</div>';
     }).join('');
 
-    // "add more" button — hidden input trick
     var addBtn = '<label class="photo-add-btn">'
       + '<input type="file" accept="image/*" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="handleAddPhotos(' + r.id + ',Array.from(this.files));this.value=\'\'">'
       + '<span class="photo-add-icon">＋</span>'
@@ -416,9 +423,9 @@ function renderRoomList() {
     return '<div class="room-card ' + r.status + '" id="rc-' + r.id + '">'
       + '<div class="room-card-header">'
       + '<div class="room-card-color" style="background:' + c.text + '"></div>'
-      + '<div class="room-card-name">' + r.name + '</div>'
+      + '<input class="room-card-name-input" value="' + escHtml(r.name) + '" onchange="renameRoom(' + r.id + ',this.value)" onblur="renameRoom(' + r.id + ',this.value)" placeholder="Nombre">'
       + '<div class="room-card-status ' + sc + '">' + st + '</div>'
-      + '<button class="room-card-remove" onclick="removeRoom(' + r.id + ')" title="Eliminar habitación">✕</button>'
+      + '<button class="room-card-remove" onclick="removeRoom(' + r.id + ')" title="Eliminar">✕</button>'
       + '</div>'
       + '<div class="photo-strip">' + photos + addBtn + '</div>'
       + '<div class="photo-count-badge">' + r.photos.length + ' foto' + (r.photos.length !== 1 ? 's' : '') + '</div>'
@@ -480,40 +487,41 @@ async function runPhase1() {
 
 /* ── ANALYZE ROOM (multi-photo) ── */
 async function analyzeRoom(room) {
-  var prompt = 'Analiza estas ' + room.photos.length + ' foto' + (room.photos.length > 1 ? 's' : '') + ' de la misma habitación tomadas desde ángulos diferentes. '
-    + 'Sintetiza la geometría real del espacio considerando todos los ángulos para obtener una estimación más precisa. '
-    + 'Devuelve SOLO JSON válido sin backticks ni texto adicional:\n'
+  var prompt = 'Analiza ' + (room.photos.length > 1 ? 'estas ' + room.photos.length + ' fotos de la misma habitación tomadas desde ángulos diferentes. Sintetiza la geometría considerando todos los ángulos.' : 'esta foto de habitación.')
+    + ' Devuelve SOLO JSON válido sin backticks ni texto adicional:\n'
     + '{"roomType":"salon|cocina|dormitorio|bano|aseo|pasillo|hall|terraza|comedor|estudio|trastero|garaje",'
     + '"widthRatio":1.2,'
     + '"doors":[{"wall":"north|south|east|west","position":0.5,"isDouble":false}],'
     + '"windows":[{"wall":"north|south|east|west","position":0.5,"width":"small|medium|large"}],'
     + '"features":[],'
-    + '"confidence":0.8,'
-    + '"photoNotes":"breve descripción de lo inferido de los distintos ángulos"}\n'
-    + 'widthRatio: proporción ancho/largo real del espacio (0.4-2.5). Con varios ángulos puedes inferirlo con más precisión.';
+    + '"confidence":0.8}\n'
+    + 'widthRatio: proporción ancho/largo real (0.4-2.5).';
 
-  // Build content array: all images + the prompt text
   var content = room.photos.map(function(p) {
-    return {
-      type: 'image',
-      source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] }
-    };
+    var mt = (p.file && p.file.type) ? p.file.type : 'image/jpeg';
+    if (!['image/jpeg','image/png','image/gif','image/webp'].includes(mt)) mt = 'image/jpeg';
+    return { type:'image', source:{ type:'base64', media_type:mt, data:p.dataUrl.split(',')[1] } };
   });
-  content.push({ type: 'text', text: prompt });
+  content.push({ type:'text', text:prompt });
 
   var resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: content }]
-    })
+    body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:800, messages:[{role:'user',content:content}] })
   });
-  if (!resp.ok) throw new Error('API ' + resp.status);
+  if (!resp.ok) {
+    var errBody = '';
+    try { errBody = JSON.stringify(await resp.json()); } catch(e) {}
+    throw new Error('API ' + resp.status + ' ' + errBody);
+  }
   var d = await resp.json();
+  if (d.error) throw new Error(d.error.message || 'API error');
   var text = d.content.map(function(b){ return b.text || ''; }).join('');
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
+  var clean = text.replace(/```json|```/g,'').trim();
+  // Extract first JSON object if there's extra text
+  var match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Respuesta no válida de la IA');
+  return JSON.parse(match[0]);
 }
 
 /* ── INFER LAYOUT ── */
@@ -533,10 +541,17 @@ async function inferLayout(rooms) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:800, messages:[{role:'user',content:prompt}] })
   });
-  if (!resp.ok) throw new Error('Layout API ' + resp.status);
+  if (!resp.ok) {
+    var errBody = '';
+    try { errBody = JSON.stringify(await resp.json()); } catch(e) {}
+    throw new Error('Layout API ' + resp.status + ' ' + errBody);
+  }
   var d = await resp.json();
+  if (d.error) throw new Error(d.error.message || 'Layout API error');
   var text = d.content.map(function(b){ return b.text || ''; }).join('');
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
+  var match = text.replace(/```json|```/g,'').trim().match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Layout no válido');
+  return JSON.parse(match[0]);
 }
 
 /* ── APPLY LAYOUT ── */
@@ -787,7 +802,19 @@ function showEmpty() {
   document.getElementById('canvasViewport').innerHTML = '<div class="empty-state"><span class="empty-icon">🏠</span><div class="empty-title">Tu plano aparecerá aquí</div><div class="empty-text">Sube fotos y pulsa <em>Analizar y ordenar</em>.</div></div>';
 }
 
+function renameRoom(id, val) {
+  var room = rooms.find(function(r){ return r.id === id; });
+  if (room && val.trim()) room.name = val.trim();
+}
+
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function showPhase2Sheet() {
+  document.getElementById('phase1sticky').style.display='none';
+  document.getElementById('phase2sticky').style.display='block';
+  document.getElementById('phase3sticky').style.display='none';
   document.getElementById('phase1content').style.display='none';
   document.getElementById('phase2content').style.display='block';
   document.getElementById('phase3content').style.display='none';
@@ -797,6 +824,9 @@ function showPhase2Sheet() {
 }
 
 function showPhase3Sheet() {
+  document.getElementById('phase1sticky').style.display='none';
+  document.getElementById('phase2sticky').style.display='none';
+  document.getElementById('phase3sticky').style.display='block';
   document.getElementById('phase1content').style.display='none';
   document.getElementById('phase2content').style.display='none';
   document.getElementById('phase3content').style.display='block';
@@ -816,6 +846,9 @@ function downloadSVG() {
 function resetAll() {
   rooms=[]; connections=[]; connectMode=false; connectFirst=null; svgContent='';
   setPhase(1); renderRoomList(); updateButtons(); showEmpty();
+  document.getElementById('phase1sticky').style.display='block';
+  document.getElementById('phase2sticky').style.display='none';
+  document.getElementById('phase3sticky').style.display='none';
   document.getElementById('phase1content').style.display='block';
   document.getElementById('phase2content').style.display='none';
   document.getElementById('phase3content').style.display='none';
